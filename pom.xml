@@ -1,0 +1,341 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+    ╔══════════════════════════════════════════════════════════════════════════╗
+    ║  security-crypto v1.0.0                                                 ║
+    ║  Pure Java utility library — NO Spring, NO framework dependencies.      ║
+    ║  JCE-based AES (ECB/CBC/GCM) + RSA + PBKDF2 password-based encryption. ║
+    ║  Publishing target: Maven Central via Sonatype Central Portal            ║
+    ╚══════════════════════════════════════════════════════════════════════════╝
+    -->
+
+    <groupId>io.github.yash-777</groupId>
+    <artifactId>security-crypto</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>${project.groupId}:${project.artifactId}</name>
+    <description>
+        security-crypto is a reusable Java cryptographic library built using the
+        Java Cryptography Architecture (JCA/JCE). It provides AES symmetric
+        encryption (ECB, CBC, GCM), RSA asymmetric encryption, PBKDF2 password-based
+        encryption with IV derived from a Date or generated randomly, key generation
+        utilities, and encryption/decryption services designed for modular, extensible,
+        and secure application development. Java 8+, zero mandatory runtime dependencies.
+    </description>
+    <url>https://github.com/Yash-777/security-crypto</url>
+    <inceptionYear>2025</inceptionYear>
+
+    <organization>
+        <name>GitHub OpenSource</name>
+        <url>https://github.com/Yash-777</url>
+    </organization>
+
+    <!-- Apache 2.0 — matches LICENSE file in repository -->
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>Yash-777</id>
+            <name>Yashwanth</name>
+            <email>yashwanth.merugu@gmail.com</email>
+            <url>https://github.com/Yash-777</url>
+            <organization>N/A</organization>
+            <organizationUrl>https://github.com/Yash-777</organizationUrl>
+            <roles><role>developer</role></roles>
+            <timezone>+5</timezone>
+        </developer>
+    </developers>
+
+    <scm>
+        <url>https://github.com/Yash-777/security-crypto</url>
+        <connection>scm:git:https://github.com/Yash-777/security-crypto.git</connection>
+        <developerConnection>scm:git:https://github.com/Yash-777/security-crypto.git</developerConnection>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/Yash-777/security-crypto/issues</url>
+    </issueManagement>
+
+    <distributionManagement>
+        <repository>
+            <id>central</id>
+            <name>Maven Central — Sonatype Central Portal</name>
+            <url>https://central.sonatype.com/api/v1/publisher/upload</url>
+        </repository>
+        <snapshotRepository>
+            <id>central</id>
+            <name>Maven Central Snapshots</name>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
+
+    <properties>
+        <java.version>8</java.version>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Last Java-8-compatible releases for optional logging facade -->
+        <slf4j.version>1.7.36</slf4j.version>
+        <logback.version>1.2.13</logback.version>
+        <junit.version>4.13.2</junit.version>
+
+        <!-- Plugin versions — pinned for reproducible builds -->
+        <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+        <maven-jar-plugin.version>3.3.0</maven-jar-plugin.version>
+        <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
+        <maven-javadoc-plugin.version>3.6.3</maven-javadoc-plugin.version>
+        <maven-gpg-plugin.version>3.2.4</maven-gpg-plugin.version>
+        <maven-release-plugin.version>3.0.1</maven-release-plugin.version>
+        <maven-surefire-plugin.version>3.2.5</maven-surefire-plugin.version>
+        <central-publishing-plugin.version>0.9.0</central-publishing-plugin.version>
+
+        <!--
+            GPG keys NEVER stored here — developer secrets go in ~/.m2/settings.xml:
+            <profile><id>release</id><properties>
+              <gpg.keyname>YOUR_FINGERPRINT</gpg.keyname>
+              <gpg.passphraseServerId>gpg-passphrase</gpg.passphraseServerId>
+            </properties></profile>
+            <servers>
+              <server><id>gpg-passphrase</id><passphrase>YOUR_GPG_PASSPHRASE</passphrase></server>
+              <server><id>github-scm</id><username>Yash-777</username><password>GITHUB_PAT</password></server>
+              <server><id>central</id><username>SONATYPE_TOKEN_USER</username><password>SONATYPE_TOKEN_PASS</password></server>
+            </servers>
+        -->
+        <project.scm.id>github-scm</project.scm.id>
+        <sonatype.central.serverId>central</sonatype.central.serverId>
+    </properties>
+
+    <dependencies>
+
+        <!--
+            Pure JDK/JCE library — ZERO mandatory runtime dependencies.
+            SLF4J API is compile-scoped; callers supply a runtime implementation
+            (Logback, Log4j2, java.util.logging bridge, etc.).
+        -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+
+        <!-- Test scope only -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+
+            <!-- Compiler — Java 8 source and target -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                    <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+
+            <!--
+                Plain library JAR — no repackaging, no fat JAR.
+                Automatic-Module-Name enables Java 9+ named-module support
+                without requiring a full module-info.java.
+                Main-Class is set so the demo runner is directly executable:
+                  java -cp security-crypto-1.0.0.jar:slf4j-api.jar:logback-classic.jar \
+                       com.github.yash777.securitycrypto.demo.CryptoFacadeRunner
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>${maven-jar-plugin.version}</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.github.yash777.securitycrypto.demo.CryptoFacadeRunner</mainClass>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <Automatic-Module-Name>com.github.yash777.securitycrypto</Automatic-Module-Name>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <!-- Surefire — JUnit 4 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven-surefire-plugin.version}</version>
+            </plugin>
+
+            <!-- REQUIRED by Maven Central: sources JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>${maven-source-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals><goal>jar-no-fork</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- REQUIRED by Maven Central: Javadoc JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>${maven-javadoc-plugin.version}</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <encoding>UTF-8</encoding>
+                    <doclint>none</doclint>
+                    <bottom>
+                        Copyright &#169; ${project.inceptionYear} Yashwanth.
+                        Licensed under the Apache License, Version 2.0.
+                    </bottom>
+                    <links>
+                        <link>https://docs.oracle.com/javase/8/docs/api/</link>
+                        <link>https://www.slf4j.org/api/</link>
+                    </links>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals><goal>jar</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                RELEASE STEPS:
+                0. Prerequisites: GPG key + Sonatype token + settings.xml (see <properties>)
+                1. mvn clean verify                           — all tests pass?
+                2. mvn release:prepare -DdryRun=true -P release
+                3. mvn release:prepare -P release             — tag + version bump
+                4. mvn release:perform -P release             — sign + deploy to Central
+                5. mvn release:rollback                       — if anything fails
+                Tag format: security-crypto/1.0.0
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-release-plugin</artifactId>
+                <version>${maven-release-plugin.version}</version>
+                <configuration>
+                    <tagNameFormat>@{project.artifactId}/@{project.version}</tagNameFormat>
+                    <autoVersionSubmodules>true</autoVersionSubmodules>
+                    <useReleaseProfile>false</useReleaseProfile>
+                    <releaseProfiles>release</releaseProfiles>
+                    <goals>deploy</goals>
+                    <checkModificationExcludes>
+                        <checkModificationExclude>target/</checkModificationExclude>
+                        <checkModificationExclude>docs/</checkModificationExclude>
+                        <checkModificationExclude>.gitignore</checkModificationExclude>
+                        <checkModificationExclude>README.md</checkModificationExclude>
+                        <checkModificationExclude>LICENSE</checkModificationExclude>
+                        <checkModificationExclude>.project</checkModificationExclude>
+                        <checkModificationExclude>.classpath</checkModificationExclude>
+                        <checkModificationExclude>.settings/</checkModificationExclude>
+                        <checkModificationExclude>.idea/</checkModificationExclude>
+                        <checkModificationExclude>*.iml</checkModificationExclude>
+                        <checkModificationExclude>.factorypath</checkModificationExclude>
+                        <checkModificationExclude>*.7z</checkModificationExclude>
+                        <checkModificationExclude>settings.xml</checkModificationExclude>
+                    </checkModificationExcludes>
+                </configuration>
+            </plugin>
+
+        </plugins>
+    </build>
+
+    <profiles>
+        <!--
+            Release profile: activated manually with -P release
+            Signs artifacts with GPG, then publishes to Maven Central
+            via Sonatype Central Portal (replaces legacy nexus-staging-maven-plugin).
+        -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+
+                    <!--
+                        GPG: signs .jar, -sources.jar, -javadoc.jar, .pom with .asc files.
+                        keyname/passphraseServerId injected from ~/.m2/settings.xml — never hardcoded.
+                        pinentry-mode loopback: required for CI/CD, suppresses TTY dialog.
+                    -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>${maven-gpg-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals><goal>sign</goal></goals>
+                                <configuration>
+                                    <keyname>${gpg.keyname}</keyname>
+                                    <passphraseServerId>${gpg.passphraseServerId}</passphraseServerId>
+                                    <gpgArguments>
+                                        <arg>--pinentry-mode</arg>
+                                        <arg>loopback</arg>
+                                    </gpgArguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!--
+                        Sonatype Central Portal publisher (replaces legacy nexus-staging-maven-plugin).
+                        autoPublish=true: no manual Portal UI click needed.
+                        waitUntil=published: blocks until live on search.maven.org.
+                    -->
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>${central-publishing-plugin.version}</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>${sonatype.central.serverId}</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                            <checksums>all</checksums>
+                            <deploymentName>${project.artifactId}-${project.version}</deploymentName>
+                        </configuration>
+                    </plugin>
+
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+</project>
