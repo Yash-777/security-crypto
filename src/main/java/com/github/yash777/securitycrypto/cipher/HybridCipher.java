@@ -52,8 +52,8 @@ public class HybridCipher {
     private static final Logger log = LoggerFactory.getLogger(HybridCipher.class);
     private static final String AES_ALGORITHM = "AES";
 
-    private final AesCipher aesCipher = new AesCipher();
-    private final RsaCipher rsaCipher = new RsaCipher();
+    private final AesSymmetricCipher  aesSymmetricCipher  = new AesSymmetricCipher();
+    private final RsaAsymmetricCipher rsaAsymmetricCipher = new RsaAsymmetricCipher();
 
     // -----------------------------------------------------------------------
     // Encrypt
@@ -72,10 +72,10 @@ public class HybridCipher {
         SecretKey sessionKey = KeyManager.generateAesKey(KeySize.AES_256);
 
         // 2. Encrypt plaintext with AES-GCM (IV auto-generated and prepended)
-        String ciphertext = aesCipher.encrypt(plaintext, sessionKey, CipherMode.GCM);
+        String ciphertext = aesSymmetricCipher.encrypt(plaintext, sessionKey, CipherMode.GCM);
 
         // 3. Wrap the session key with RSA OAEP
-        String wrappedKey = rsaCipher.encryptBytes(sessionKey.getEncoded(), publicKey);
+        String wrappedKey = rsaAsymmetricCipher.encryptBytes(sessionKey.getEncoded(), publicKey);
 
         log.info("Hybrid encrypt complete — wrappedKey={} chars, ciphertext={} chars",
                 wrappedKey.length(), ciphertext.length());
@@ -99,11 +99,11 @@ public class HybridCipher {
             throws InvalidCiphertextException {
 
         // 1. Unwrap the AES session key with RSA
-        byte[] keyBytes  = rsaCipher.decryptBytes(payload.wrappedKey(), privateKey);
+        byte[] keyBytes  = rsaAsymmetricCipher.decryptBytes(payload.wrappedKey(), privateKey);
         SecretKey sessionKey = new SecretKeySpec(keyBytes, AES_ALGORITHM);
 
         // 2. Decrypt the AES-GCM ciphertext
-        String plaintext = aesCipher.decrypt(payload.ciphertext(), sessionKey, CipherMode.GCM);
+        String plaintext = aesSymmetricCipher.decrypt(payload.ciphertext(), sessionKey, CipherMode.GCM);
 
         log.info("Hybrid decrypt complete — recovered {} chars", plaintext.length());
         return plaintext;

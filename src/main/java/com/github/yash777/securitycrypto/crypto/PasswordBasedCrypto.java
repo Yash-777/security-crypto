@@ -11,6 +11,7 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
+import java.security.AlgorithmParameters;
 import java.security.SecureRandom;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -23,54 +24,50 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 /**
  * Password-based AES-CBC encryption using PBKDF2 key derivation — Java 8 compatible.
  *
- * <p>This class implements the pattern used in
- * {@code com.github.yash777.security.crypto.CryptoService} from the MyWorld project,
- * generalised to support two IV strategies:
- * <ul>
- *   <li><strong>IV from Date</strong> — the first 16 bytes of the date string
- *       (formatted as {@value #DEFAULT_DATE_FORMAT}) are used as a deterministic IV.
- *       Both sides must agree on the same date to reproduce the same IV.</li>
- *   <li><strong>Random IV</strong> — a cryptographically random 16-byte IV is generated
- *       with {@link SecureRandom} and prepended to the ciphertext, so the receiver
- *       does not need any out-of-band IV transmission.</li>
- * </ul>
+ * <p>Generalises {@code CryptoService.encode()} from the MyWorld project into a
+ * reusable, configurable class that supports three IV strategies:
+ *
+ * <table border="1" summary="IV strategies" cellpadding="4">
+ *   <tr><th>Method pair</th><th>Wire format</th><th>Deterministic?</th></tr>
+ *   <tr>
+ *     <td>{@link #encryptWithRandomIv} / {@link #decryptWithRandomIv}</td>
+ *     <td>{@code Base64( IV(16B) || ciphertext )}</td>
+ *     <td>No — recommended for new code</td>
+ *   </tr>
+ *   <tr>
+ *     <td>{@link #encryptWithDateIv} / {@link #decryptWithDateIv}</td>
+ *     <td>{@code Base64( ciphertext )} — IV re-derived from date on both sides</td>
+ *     <td>Yes — clean output, date must be shared</td>
+ *   </tr>
+ *   <tr>
+ *     <td>{@link #encryptWithSaltIvPrefix} / {@link #decryptWithSaltIvPrefix}</td>
+ *     <td>{@code Base64( saltBytes(N) || IV(16B) || ciphertext )} — exact CryptoService layout</td>
+ *     <td>Yes — date not needed on decrypt (IV is in the buffer)</td>
+ *   </tr>
+ * </table>
+ *
+ * <h2>Why encryptWithDateIv and encryptWithSaltIvPrefix differ</h2>
+ * <p>Both use the same PBKDF2 key and the same date-derived IV bytes, so the raw
+ * AES ciphertext is <em>identical</em>. The only difference is what gets prepended:
+ * <pre>
+ *   encryptWithDateIv()       → Base64( ciphertext )                          ← clean
+ *   encryptWithSaltIvPrefix() → Base64( salt(N) || IV(16) || ciphertext )     ← full CryptoService layout
+ *
+ *   Example (salt="Yash@gmail.com", date="2023-12-29T10:09:34", password="Yash@001"):
+ *     encryptWithDateIv()       → "/od2rFy3shnMt2ehEQdUJA=="
+ *     encryptWithSaltIvPrefix() → "WWFzaEBnbWFpbC5jb20yMDIzLTEyLTI5VDEwOjA5/od2rFy3shnMt2ehEQdUJA=="
+ *                                   
+ *                             ───────────────────────────────────────────────────────────────────────────
+ *                                WWFzaEBnbWFpbC5jb20  2MDIzLTEyLTI5VDEwOjA5  /od2rFy3shnMt2ehEQdUJA==
+ *                                ↑ "Yash@gmail.com"    ↑ "2023-12-29T10:09"    ↑ actual ciphertext
+ *                                   (salt — 14 B)           (IV — 16 B)           (same in both)
+ *                             ───────────────────────────────────────────────────────────────────────────
+ * </pre>
  *
  * <h2>Key derivation</h2>
- * <p>The passphrase is strengthened using
- * <a href="https://www.ietf.org/rfc/rfc2898.txt">PBKDF2WithHmacSHA256</a>
- * (SHA-1 variant also available via {@link Algorithm}) with a configurable salt and
- * iteration count. This approach is recommended in:
- * <ul>
- *   <li><a href="https://stackoverflow.com/a/32583766/5081877">
- *       SO answer 32583766</a> — AES password-based encryption</li>
- *   <li><a href="https://stackoverflow.com/questions/992019/java-256-bit-aes-password-based-encryption">
- *       SO 992019</a> — Java 256-bit AES password-based encryption</li>
- * </ul>
- *
- * <h2>Wire format — with random IV</h2>
- * <pre>
- *   Base64( IV_bytes_16 || ciphertext_bytes )
- * </pre>
- *
- * <h2>Wire format — with date IV</h2>
- * <pre>
- *   Base64( ciphertext_bytes )
- *   (IV is re-derived from the date on decrypt — not prepended)
- * </pre>
- *
- * <h2>Usage example</h2>
- * <pre>{@code
- * PasswordBasedCrypto pbc = new PasswordBasedCrypto();
- *
- * // Encrypt with random IV — self-contained, IV embedded in output
- * String ct = pbc.encryptWithRandomIv("secret data", "myPassphrase", "userSalt");
- * String pt = pbc.decryptWithRandomIv(ct, "myPassphrase", "userSalt");
- *
- * // Encrypt with date IV — deterministic, both sides must share the date
- * Date enrollDate = new Date();
- * String ctDate = pbc.encryptWithDateIv("secret data", "myPassphrase", "userSalt", enrollDate);
- * String ptDate  = pbc.decryptWithDateIv(ctDate, "myPassphrase", "userSalt", enrollDate);
- * }</pre>
+ * <p>The passphrase is strengthened via PBKDF2 (SHA-1 or SHA-256) before use as an AES key.
+ * See <a href="https://stackoverflow.com/a/32583766/5081877">SO 32583766</a> and
+ * <a href="https://stackoverflow.com/questions/992019/java-256-bit-aes-password-based-encryption">SO 992019</a>.
  *
  * @author  Yash
  * @version 1.0.0
@@ -93,22 +90,27 @@ public class PasswordBasedCrypto {
     /** AES cipher transformation used for all encrypt/decrypt operations. */
     public static final String TRANSFORMATION = "AES/CBC/PKCS5Padding";
 
-    /** AES algorithm name for {@link SecretKeySpec}. */
+    /** AES algorithm name used in {@link SecretKeySpec}. */
     public static final String AES_ALGORITHM = "AES";
 
     /** IV length in bytes required by AES-CBC (one AES block = 16 bytes). */
     public static final int IV_LENGTH = 16;
 
+    // -----------------------------------------------------------------------
+    // Algorithm enum
+    // -----------------------------------------------------------------------
+
     /**
-     * PBKDF2 key derivation algorithm variants.
+     * PBKDF2 key-derivation algorithm variants.
      *
-     * <p>HMAC-SHA256 is preferred for new code. HMAC-SHA1 is provided for compatibility
-     * with legacy systems (used in the original {@code CryptoService}).
+     * <p>{@link #PBKDF2_HMAC_SHA1} matches {@code EncoderConstants.PBKDF2_ALGORITHM}
+     * in the original {@code CryptoService}. {@link #PBKDF2_HMAC_SHA256} is the
+     * recommended choice for all new code.
      */
     public enum Algorithm {
 
         /**
-         * PBKDF2 with HMAC-SHA-1 — legacy, used in CryptoService from MyWorld.
+         * PBKDF2 with HMAC-SHA-1 — legacy; matches original CryptoService settings.
          * Produces a 128-bit or 256-bit AES key.
          */
         PBKDF2_HMAC_SHA1("PBKDF2WithHmacSHA1"),
@@ -151,140 +153,135 @@ public class PasswordBasedCrypto {
     }
 
     /**
-     * Creates a {@code PasswordBasedCrypto} matching the original {@code CryptoService}
-     * behaviour: PBKDF2-HMAC-SHA1, 1024 iterations, 128-bit key.
+     * Full constructor for explicit PBKDF2 settings.
      *
-     * @return a {@code PasswordBasedCrypto} configured for legacy compatibility
+     * @param algorithm     PBKDF2 variant
+     * @param iterations    iteration count (use 1024 for CryptoService compatibility)
+     * @param keyLengthBits AES key length in bits (128 or 256)
+     */
+    public PasswordBasedCrypto(Algorithm algorithm, int iterations, int keyLengthBits) {
+        this.algorithm     = algorithm;
+        this.iterations    = iterations;
+        this.keyLengthBits = keyLengthBits;
+    }
+
+    /**
+     * Factory for exact {@code CryptoService} compatibility:
+     * PBKDF2-HMAC-SHA1, 1024 iterations, 128-bit key.
+     *
+     * @return legacy-mode instance
      */
     public static PasswordBasedCrypto legacyMode() {
         return new PasswordBasedCrypto(Algorithm.PBKDF2_HMAC_SHA1, 1024, 128);
     }
 
-    /**
-     * Creates a {@code PasswordBasedCrypto} with explicit settings.
-     *
-     * @param algorithm     PBKDF2 algorithm ({@link Algorithm#PBKDF2_HMAC_SHA1} or
-     *                      {@link Algorithm#PBKDF2_HMAC_SHA256})
-     * @param iterations    PBKDF2 iteration count (minimum 10000 recommended for new code;
-     *                      use 1024 for legacy CryptoService compatibility)
-     * @param keyLengthBits AES key length in bits (128 or 256)
-     */
-    public PasswordBasedCrypto(Algorithm algorithm, int iterations, int keyLengthBits) {
-        this.algorithm      = algorithm;
-        this.iterations     = iterations;
-        this.keyLengthBits  = keyLengthBits;
-    }
-
     // -----------------------------------------------------------------------
-    // Random IV — self-contained (recommended)
+    // Strategy 1 — Random IV (recommended)
     // -----------------------------------------------------------------------
 
     /**
-     * Encrypts {@code data} using PBKDF2-derived AES-CBC with a <strong>random IV</strong>.
+     * Encrypts {@code data} with a cryptographically random IV.
      *
-     * <p>The IV is generated with {@link SecureRandom} and prepended to the ciphertext,
-     * so the returned Base64 string is fully self-contained — no separate IV transmission
-     * is required. Use {@link #decryptWithRandomIv} to decrypt.
+     * <p>Wire format: {@code Base64( IV(16B) || ciphertext )}
+     * The IV is embedded — the receiver only needs the passphrase and salt.
      *
-     * <p>This is the recommended method for all new code where both sides share
-     * the same passphrase and salt but do not need a deterministic IV.
-     *
-     * @param data       plaintext to encrypt (UTF-8)
-     * @param passphrase secret passphrase for PBKDF2 key derivation
-     * @param salt       per-user/per-record salt (e.g. username or record ID);
-     *                   does not need to be secret, but should be unique per record
-     * @return Base64-encoded payload: {@code Base64(IV_16bytes || ciphertext)}
-     * @throws CryptoOperationException if key derivation or cipher init fails
+     * @param data       plaintext to encrypt
+     * @param passphrase PBKDF2 passphrase (e.g. the master key)
+     * @param salt       per-record salt (e.g. username); unique per record, not secret
+     * @return Base64-encoded {@code IV || ciphertext}
+     * @throws CryptoOperationException if encryption fails
      */
     public String encryptWithRandomIv(String data, String passphrase, String salt) {
         byte[] iv = new byte[IV_LENGTH];
         secureRandom.nextBytes(iv);
-        byte[] cipherBytes = doEncrypt(data, passphrase, salt, iv);
+        byte[] cipherBytes = doEncrypt(data, passphrase, salt.getBytes(UTF_8), iv);
 
-        // Prepend IV so the receiver can recover it without out-of-band communication
         byte[] payload = new byte[IV_LENGTH + cipherBytes.length];
         System.arraycopy(iv,          0, payload, 0,         IV_LENGTH);
         System.arraycopy(cipherBytes, 0, payload, IV_LENGTH, cipherBytes.length);
 
         String result = Base64.getEncoder().encodeToString(payload);
-        log.debug("encryptWithRandomIv: plainLen={} base64Len={}", data.length(), result.length());
+        log.debug("encryptWithRandomIv: plainLen={} outputLen={}", data.length(), result.length());
         return result;
     }
 
     /**
-     * Decrypts a Base64-encoded payload produced by {@link #encryptWithRandomIv}.
+     * Decrypts a payload produced by {@link #encryptWithRandomIv}.
      *
-     * <p>The first 16 bytes of the decoded payload are the IV; the remainder
-     * is the ciphertext.
+     * <p>Extracts the first 16 bytes as the IV, decrypts the remainder.
      *
-     * @param encryptedBase64 the Base64 string returned by {@code encryptWithRandomIv}
-     * @param passphrase      the same passphrase used during encryption
-     * @param salt            the same salt used during encryption
-     * @return decrypted plaintext string (UTF-8)
-     * @throws InvalidCiphertextException if the payload is malformed, truncated,
-     *         or the wrong passphrase/salt is supplied
-     * @throws CryptoOperationException   if cipher initialisation fails
+     * @param encryptedBase64 Base64 string from {@code encryptWithRandomIv}
+     * @param passphrase      same passphrase used during encryption
+     * @param salt            same salt used during encryption
+     * @return decrypted plaintext
+     * @throws InvalidCiphertextException if payload is malformed or credentials are wrong
      */
     public String decryptWithRandomIv(String encryptedBase64, String passphrase, String salt)
             throws InvalidCiphertextException {
 
-        byte[] payload = decodeBase64(encryptedBase64);
+        byte[] payload = decodeBase64Safe(encryptedBase64);
         if (payload.length <= IV_LENGTH) {
             throw new InvalidCiphertextException(
                     "Payload too short — expected >" + IV_LENGTH + " bytes but got " + payload.length);
         }
         byte[] iv          = Arrays.copyOfRange(payload, 0, IV_LENGTH);
         byte[] cipherBytes = Arrays.copyOfRange(payload, IV_LENGTH, payload.length);
-
-        return doDecrypt(cipherBytes, passphrase, salt, iv);
+        return doDecrypt(cipherBytes, passphrase, salt.getBytes(UTF_8), iv);
     }
 
     // -----------------------------------------------------------------------
-    // Date-derived IV — deterministic (matches CryptoService pattern)
+    // Strategy 2 — Date-derived IV (clean output, deterministic)
     // -----------------------------------------------------------------------
 
     /**
-     * Encrypts {@code data} using PBKDF2-derived AES-CBC with an IV
-     * <strong>derived from a {@link Date}</strong>.
+     * Encrypts {@code data} with an IV derived from {@code date}.
      *
-     * <p>The date is formatted using {@value #DEFAULT_DATE_FORMAT} and the first
-     * 16 UTF-8 bytes of that string become the IV. This mirrors the approach in
-     * {@code CryptoService.encode()} from the MyWorld project, where the IV comes
-     * from the record creation date.
+     * <p>Wire format: {@code Base64( ciphertext )} — the IV is <em>not</em> stored in
+     * the output; both sides re-derive it from the same date. Use
+     * {@link #decryptWithDateIv(String, String, String, Date)} to decrypt.
      *
-     * <p><strong>Security note:</strong> A date-derived IV is predictable. Use only
-     * in protocols where the date is a known, agreed-upon parameter. The receiver must
-     * call {@link #decryptWithDateIv(String, String, String, Date)} with the same date.
+     * <p>The IV is the first 16 UTF-8 bytes of the date formatted as
+     * {@value #DEFAULT_DATE_FORMAT}, e.g. {@code "2023-12-29T10:09:34"} → IV = {@code "2023-12-29T10:09"}.
      *
-     * @param data       plaintext to encrypt (UTF-8)
-     * @param passphrase secret passphrase for PBKDF2 key derivation
-     * @param salt       per-user/per-record salt (e.g. username)
-     * @param date       the date from which to derive the IV
-     * @return Base64-encoded ciphertext (IV is NOT prepended — re-derived on decrypt)
-     * @throws CryptoOperationException if key derivation or cipher init fails
+     * @param data       plaintext to encrypt
+     * @param passphrase PBKDF2 passphrase
+     * @param salt       per-record salt (e.g. username)
+     * @param date       record creation date used to derive the IV
+     * @return Base64-encoded ciphertext only (no IV prefix)
+     * @throws CryptoOperationException if encryption fails
      */
     public String encryptWithDateIv(String data, String passphrase, String salt, Date date) {
-        byte[] iv = ivFromDate(date, DEFAULT_DATE_FORMAT);
-        byte[] cipherBytes = doEncrypt(data, passphrase, salt, iv);
-        String result = Base64.getEncoder().encodeToString(cipherBytes);
-        log.debug("encryptWithDateIv: date={} plainLen={} base64Len={}",
-                formatDate(date, DEFAULT_DATE_FORMAT), data.length(), result.length());
+        return encryptWithDateIv(data, passphrase, salt, date, DEFAULT_DATE_FORMAT);
+    }
+
+    /**
+     * Encrypts using a date-derived IV with a custom date format.
+     *
+     * @param data       plaintext to encrypt
+     * @param passphrase PBKDF2 passphrase
+     * @param salt       per-record salt
+     * @param date       date used to derive the IV
+     * @param dateFormat {@link SimpleDateFormat} pattern
+     * @return Base64-encoded ciphertext only
+     */
+    public String encryptWithDateIv(String data, String passphrase, String salt,
+                                    Date date, String dateFormat) {
+        byte[] iv          = ivFromDate(date, dateFormat);
+        byte[] cipherBytes = doEncrypt(data, passphrase, salt.getBytes(UTF_8), iv);
+        String result      = Base64.getEncoder().encodeToString(cipherBytes);
+        log.debug("encryptWithDateIv: date={} plainLen={} outputLen={}",
+                formatDate(date, dateFormat), data.length(), result.length());
         return result;
     }
 
     /**
-     * Encrypts {@code data} with an IV derived from a date string.
+     * Encrypts using an IV derived from a date string (convenience overload).
      *
-     * <p>Convenience overload accepting the date as a string; the string is parsed
-     * using {@link #DEFAULT_DATE_FORMAT} ({@value #DEFAULT_DATE_FORMAT}).
-     *
-     * @param data        plaintext to encrypt (UTF-8)
-     * @param passphrase  secret passphrase
+     * @param data        plaintext to encrypt
+     * @param passphrase  PBKDF2 passphrase
      * @param salt        per-record salt
-     * @param dateString  date string in format {@value #DEFAULT_DATE_FORMAT},
-     *                    e.g. {@code "2023-12-29T10:09:34"}
-     * @return Base64-encoded ciphertext
-     * @throws CryptoOperationException if the date string cannot be parsed or encryption fails
+     * @param dateString  date string in {@value #DEFAULT_DATE_FORMAT}
+     * @return Base64-encoded ciphertext only
      */
     public String encryptWithDateIv(String data, String passphrase, String salt, String dateString) {
         Date date = parseDate(dateString, DEFAULT_DATE_FORMAT);
@@ -292,36 +289,49 @@ public class PasswordBasedCrypto {
     }
 
     /**
-     * Decrypts a Base64-encoded payload produced by {@link #encryptWithDateIv(String, String, String, Date)}.
+     * Decrypts a payload produced by {@link #encryptWithDateIv(String, String, String, Date)}.
      *
-     * <p>The IV is re-derived from {@code date} using {@value #DEFAULT_DATE_FORMAT} — it
-     * is not embedded in the ciphertext.
+     * <p>Re-derives the IV from {@code date} — the date must be the same one used during encryption.
      *
-     * @param encryptedBase64 the Base64 string returned by {@code encryptWithDateIv}
-     * @param passphrase      the same passphrase used during encryption
-     * @param salt            the same salt used during encryption
-     * @param date            the same date used during encryption
-     * @return decrypted plaintext string (UTF-8)
-     * @throws InvalidCiphertextException if the ciphertext is malformed or the wrong credentials
-     * @throws CryptoOperationException   if cipher initialisation fails
+     * @param encryptedBase64 Base64 ciphertext from {@code encryptWithDateIv}
+     * @param passphrase      same passphrase used during encryption
+     * @param salt            same salt used during encryption
+     * @param date            same date used during encryption
+     * @return decrypted plaintext
+     * @throws InvalidCiphertextException if decryption fails
      */
     public String decryptWithDateIv(String encryptedBase64, String passphrase, String salt, Date date)
             throws InvalidCiphertextException {
-        byte[] iv          = ivFromDate(date, DEFAULT_DATE_FORMAT);
-        byte[] cipherBytes = decodeBase64(encryptedBase64);
-        return doDecrypt(cipherBytes, passphrase, salt, iv);
+        return decryptWithDateIv(encryptedBase64, passphrase, salt, date, DEFAULT_DATE_FORMAT);
     }
 
     /**
-     * Decrypts a Base64-encoded payload using a date string to re-derive the IV.
+     * Decrypts using a date-derived IV with a custom date format.
      *
-     * @param encryptedBase64 the Base64 string returned by {@code encryptWithDateIv}
-     * @param passphrase      the same passphrase used during encryption
-     * @param salt            the same salt used during encryption
-     * @param dateString      date string in format {@value #DEFAULT_DATE_FORMAT}
-     * @return decrypted plaintext string
+     * @param encryptedBase64 Base64 ciphertext
+     * @param passphrase      PBKDF2 passphrase
+     * @param salt            per-record salt
+     * @param date            date used during encryption
+     * @param dateFormat      {@link SimpleDateFormat} pattern used during encryption
+     * @return decrypted plaintext
      * @throws InvalidCiphertextException if decryption fails
-     * @throws CryptoOperationException   if the date string cannot be parsed
+     */
+    public String decryptWithDateIv(String encryptedBase64, String passphrase, String salt,
+                                    Date date, String dateFormat) throws InvalidCiphertextException {
+        byte[] iv          = ivFromDate(date, dateFormat);
+        byte[] cipherBytes = decodeBase64Safe(encryptedBase64);
+        return doDecrypt(cipherBytes, passphrase, salt.getBytes(UTF_8), iv);
+    }
+
+    /**
+     * Decrypts using an IV derived from a date string (convenience overload).
+     *
+     * @param encryptedBase64 Base64 ciphertext
+     * @param passphrase      PBKDF2 passphrase
+     * @param salt            per-record salt
+     * @param dateString      date string in {@value #DEFAULT_DATE_FORMAT}
+     * @return decrypted plaintext
+     * @throws InvalidCiphertextException if decryption fails
      */
     public String decryptWithDateIv(String encryptedBase64, String passphrase, String salt,
                                     String dateString) throws InvalidCiphertextException {
@@ -330,54 +340,159 @@ public class PasswordBasedCrypto {
     }
 
     // -----------------------------------------------------------------------
-    // Custom date format overloads
+    // Strategy 3 — CryptoService full wire-format: salt || IV || ciphertext
     // -----------------------------------------------------------------------
 
     /**
-     * Encrypts {@code data} with an IV derived from {@code date} formatted using a
-     * custom {@code dateFormat}.
+     * Encrypts in the <strong>exact wire format</strong> of {@code CryptoService.encode()}.
      *
-     * @param data        plaintext to encrypt
-     * @param passphrase  secret passphrase
-     * @param salt        per-record salt
-     * @param date        the date from which to derive the IV
-     * @param dateFormat  {@link SimpleDateFormat} pattern, e.g. {@code "yyyy-MM-dd HH:mm:ss"}
-     * @return Base64-encoded ciphertext
+     * <h3>Buffer layout</h3>
+     * <pre>
+     *   Base64( saltBytes(N) || ivBytes(16) || ciphertext )
+     *           ^username         ^date-IV
+     * </pre>
+     *
+     * <h3>CryptoService code reproduced</h3>
+     * <pre>
+     *   // IV from date string (first 16 bytes)
+     *   byte[] ivBytes = new byte[16];
+     *   System.arraycopy(dateString.getBytes("UTF-8"), 0, ivBytes, 0, 16);
+     *
+     *   // Init cipher — re-read IV from getParameters() (same value, confirms what cipher uses)
+     *   cipher.init(Cipher.ENCRYPT_MODE, secret, new IvParameterSpec(ivBytes));
+     *   ivBytes = cipher.getParameters().getParameterSpec(IvParameterSpec.class).getIV();
+     *
+     *   byte[] ciphertext = cipher.doFinal(rawPass.getBytes("UTF-8"));
+     *
+     *   // Assemble: salt || iv || ciphertext
+     *   byte[] buffer = new byte[saltBytes.length + ivBytes.length + ciphertext.length];
+     *   System.arraycopy(saltBytes,  0, buffer, 0, saltBytes.length);
+     *   System.arraycopy(ivBytes,    0, buffer, saltBytes.length, ivBytes.length);
+     *   System.arraycopy(ciphertext, 0, buffer, saltBytes.length + ivBytes.length, ciphertext.length);
+     *   return Base64.encode(buffer);
+     * </pre>
+     *
+     * <h3>Why the two outputs differ for the same inputs</h3>
+     * <pre>
+     *   encryptWithDateIv()       → "/od2rFy3shnMt2ehEQdUJA=="
+     *   encryptWithSaltIvPrefix() → "WWFzaEBnbWFpbC5jb20yMDIzLTEyLTI5VDEwOjA5/od2rFy3shnMt2ehEQdUJA=="
+     *                                 ← "Yash@gmail.com" + "2023-12-29T10:09" + same ciphertext →
+     *                             ───────────────────────────────────────────────────────────────────────────
+     *                                WWFzaEBnbWFpbC5jb20  2MDIzLTEyLTI5VDEwOjA5  /od2rFy3shnMt2ehEQdUJA==
+     *                                ↑ "Yash@gmail.com"    ↑ "2023-12-29T10:09"    ↑ actual ciphertext
+     *                                   (salt — 14 B)           (IV — 16 B)           (same in both)
+     *                             ───────────────────────────────────────────────────────────────────────────
+     * </pre>
+     *
+     * @param rawPass    the plaintext password to encrypt
+     * @param passphrase the PBKDF2 master passphrase (e.g. {@code CryptoService.key})
+     * @param salt       per-user salt / username — prepended to output AND used as PBKDF2 salt
+     * @param date       record creation date; first 16 UTF-8 bytes of formatted string = IV
+     * @return Base64-encoded {@code saltBytes || IV(16B) || ciphertext}
      * @throws CryptoOperationException if encryption fails
+     * @see #decryptWithSaltIvPrefix(String, String, String)
      */
-    public String encryptWithDateIv(String data, String passphrase, String salt,
-                                    Date date, String dateFormat) {
-        byte[] iv = ivFromDate(date, dateFormat);
-        byte[] cipherBytes = doEncrypt(data, passphrase, salt, iv);
-        return Base64.getEncoder().encodeToString(cipherBytes);
+    public String encryptWithSaltIvPrefix(String rawPass, String passphrase, String salt, Date date) {
+        return encryptWithSaltIvPrefix(rawPass, passphrase, salt, date, DEFAULT_DATE_FORMAT);
     }
 
     /**
-     * Decrypts with an IV derived from {@code date} using a custom {@code dateFormat}.
+     * Encrypts in the CryptoService wire format using a custom date pattern.
      *
-     * @param encryptedBase64 Base64 ciphertext
-     * @param passphrase      secret passphrase
-     * @param salt            per-record salt
-     * @param date            the date used during encryption
-     * @param dateFormat      {@link SimpleDateFormat} pattern used during encryption
+     * @param rawPass    plaintext to encrypt
+     * @param passphrase PBKDF2 master passphrase
+     * @param salt       per-user salt (username) — prepended to output
+     * @param date       creation date for IV derivation
+     * @param dateFormat {@link SimpleDateFormat} pattern
+     * @return Base64-encoded {@code saltBytes || IV(16B) || ciphertext}
+     */
+    public String encryptWithSaltIvPrefix(String rawPass, String passphrase, String salt,
+                                             Date date, String dateFormat) {
+        try {
+            byte[] saltBytes = salt.getBytes(UTF_8);
+
+            // Step 1 — IV from date string (first 16 UTF-8 bytes)
+            byte[] ivBytes   = new byte[IV_LENGTH];
+            byte[] dateBytes = new SimpleDateFormat(dateFormat).format(date).getBytes(UTF_8);
+            System.arraycopy(dateBytes, 0, ivBytes, 0, Math.min(dateBytes.length, IV_LENGTH));
+
+            // Step 2 — Derive PBKDF2 key (passphrase = master key, salt = username bytes)
+            SecretKey key = deriveKey(passphrase, saltBytes);
+
+            // Step 3 — Init cipher and re-read IV from cipher.getParameters()
+            //          (matches CryptoService exactly — same value confirmed from cipher state)
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(ivBytes));
+            AlgorithmParameters params = cipher.getParameters();
+            ivBytes = params.getParameterSpec(IvParameterSpec.class).getIV();
+
+            // Step 4 — Encrypt
+            byte[] ciphertext = cipher.doFinal(rawPass.getBytes(UTF_8));
+
+            // Step 5 — Assemble: saltBytes || ivBytes(16) || ciphertext
+            byte[] buffer = new byte[saltBytes.length + IV_LENGTH + ciphertext.length];
+            System.arraycopy(saltBytes, 0, buffer, 0,                            saltBytes.length);
+            System.arraycopy(ivBytes,   0, buffer, saltBytes.length,             IV_LENGTH);
+            System.arraycopy(ciphertext,0, buffer, saltBytes.length + IV_LENGTH, ciphertext.length);
+
+            String result = Base64.getEncoder().encodeToString(buffer);
+            log.debug("encryptWithSaltIvPrefix: salt={} date={} outputLen={}",
+                    salt, formatDate(date, dateFormat), result.length());
+            return result;
+
+        } catch (Exception e) {
+            throw new CryptoOperationException(
+                    "encryptWithSaltIvPrefix failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Decrypts a payload produced by {@link #encryptWithSaltIvPrefix}.
+     *
+     * <p>Extracts the IV from its known position in the buffer — the original date
+     * is <strong>not</strong> needed because the IV is already embedded.
+     *
+     * <h3>Buffer layout assumed</h3>
+     * <pre>
+     *   decoded[0 .. saltLen)              = salt bytes (skipped)
+     *   decoded[saltLen .. saltLen+16)     = IV bytes   (extracted)
+     *   decoded[saltLen+16 .. end)         = ciphertext (decrypted)
+     * </pre>
+     *
+     * @param encodedBase64 Base64 string from {@code encryptWithSaltIvPrefix}
+     * @param passphrase    PBKDF2 master passphrase (same as used during encryption)
+     * @param salt          username — needed to calculate where the salt prefix ends
      * @return decrypted plaintext
-     * @throws InvalidCiphertextException if decryption fails
+     * @throws InvalidCiphertextException if the payload is malformed or credentials are wrong
      */
-    public String decryptWithDateIv(String encryptedBase64, String passphrase, String salt,
-                                    Date date, String dateFormat) throws InvalidCiphertextException {
-        byte[] iv          = ivFromDate(date, dateFormat);
-        byte[] cipherBytes = decodeBase64(encryptedBase64);
-        return doDecrypt(cipherBytes, passphrase, salt, iv);
+    public String decryptWithSaltIvPrefix(String encodedBase64, String passphrase, String salt)
+            throws InvalidCiphertextException {
+
+        byte[] buffer    = decodeBase64Safe(encodedBase64);
+        byte[] saltBytes = salt.getBytes(UTF_8);
+        int    saltLen   = saltBytes.length;
+
+        if (buffer.length <= saltLen + IV_LENGTH) {
+            throw new InvalidCiphertextException(
+                    "CryptoService payload too short: expected >" + (saltLen + IV_LENGTH)
+                    + "B but got " + buffer.length);
+        }
+
+        // Extract IV and ciphertext from their fixed positions
+        byte[] ivBytes     = Arrays.copyOfRange(buffer, saltLen, saltLen + IV_LENGTH);
+        byte[] cipherBytes = Arrays.copyOfRange(buffer, saltLen + IV_LENGTH, buffer.length);
+
+        return doDecrypt(cipherBytes, passphrase, saltBytes, ivBytes);
     }
 
     // -----------------------------------------------------------------------
-    // Date utility methods
+    // Date utility methods (public helpers)
     // -----------------------------------------------------------------------
 
     /**
-     * Parses a date string using the given format pattern.
+     * Parses a date string using the given pattern.
      *
-     * @param dateString the date string to parse
+     * @param dateString the string to parse
      * @param format     {@link SimpleDateFormat} pattern
      * @return the parsed {@link Date}
      * @throws CryptoOperationException if parsing fails
@@ -407,22 +522,18 @@ public class PasswordBasedCrypto {
     // -----------------------------------------------------------------------
 
     /**
-     * Derives an AES {@link SecretKey} from the passphrase and salt using PBKDF2.
+     * Derives an AES key from {@code passphrase} and raw {@code saltBytes} via PBKDF2.
      *
-     * <p>Implements the key derivation approach described in
-     * <a href="https://stackoverflow.com/questions/992019/java-256-bit-aes-password-based-encryption">
-     * SO 992019</a>.
-     *
-     * @param passphrase the secret passphrase
-     * @param salt       the per-record salt bytes
+     * @param passphrase PBKDF2 password (the master key string)
+     * @param saltBytes  raw salt bytes (typically {@code username.getBytes(UTF_8)})
      * @return derived AES {@link SecretKey}
-     * @throws CryptoOperationException if the PBKDF2 algorithm is unavailable
+     * @throws CryptoOperationException if the algorithm is unavailable
      */
-    private SecretKey deriveKey(String passphrase, byte[] salt) {
+    private SecretKey deriveKey(String passphrase, byte[] saltBytes) {
         try {
             SecretKeyFactory factory = SecretKeyFactory.getInstance(algorithm.jceName);
             PBEKeySpec spec = new PBEKeySpec(
-                    passphrase.toCharArray(), salt, iterations, keyLengthBits);
+                    passphrase.toCharArray(), saltBytes, iterations, keyLengthBits);
             SecretKey tmp = factory.generateSecret(spec);
             spec.clearPassword(); // defensive: clear passphrase from memory
             return new SecretKeySpec(tmp.getEncoded(), AES_ALGORITHM);
@@ -435,16 +546,15 @@ public class PasswordBasedCrypto {
     /**
      * Performs raw AES-CBC encryption.
      *
-     * @param plaintext  plaintext UTF-8 string
-     * @param passphrase secret passphrase
-     * @param salt       salt string (e.g. username)
-     * @param iv         16-byte initialisation vector
+     * @param plaintext  UTF-8 string to encrypt
+     * @param passphrase PBKDF2 passphrase
+     * @param saltBytes  raw salt bytes
+     * @param iv         16-byte IV
      * @return raw ciphertext bytes
-     * @throws CryptoOperationException if encryption fails
      */
-    private byte[] doEncrypt(String plaintext, String passphrase, String salt, byte[] iv) {
+    private byte[] doEncrypt(String plaintext, String passphrase, byte[] saltBytes, byte[] iv) {
         try {
-            SecretKey key = deriveKey(passphrase, salt.getBytes(UTF_8));
+            SecretKey key = deriveKey(passphrase, saltBytes);
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(iv));
             return cipher.doFinal(plaintext.getBytes(UTF_8));
@@ -456,17 +566,17 @@ public class PasswordBasedCrypto {
     /**
      * Performs raw AES-CBC decryption.
      *
-     * @param cipherBytes raw ciphertext bytes (without IV prefix)
-     * @param passphrase  secret passphrase
-     * @param salt        salt string
-     * @param iv          16-byte initialisation vector
+     * @param cipherBytes raw ciphertext
+     * @param passphrase  PBKDF2 passphrase
+     * @param saltBytes   raw salt bytes
+     * @param iv          16-byte IV
      * @return decrypted plaintext string
-     * @throws InvalidCiphertextException if decryption fails (bad padding, wrong key, etc.)
+     * @throws InvalidCiphertextException if decryption fails
      */
-    private String doDecrypt(byte[] cipherBytes, String passphrase, String salt, byte[] iv)
+    private String doDecrypt(byte[] cipherBytes, String passphrase, byte[] saltBytes, byte[] iv)
             throws InvalidCiphertextException {
         try {
-            SecretKey key = deriveKey(passphrase, salt.getBytes(UTF_8));
+            SecretKey key = deriveKey(passphrase, saltBytes);
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));
             byte[] plain = cipher.doFinal(cipherBytes);
@@ -479,29 +589,28 @@ public class PasswordBasedCrypto {
     }
 
     /**
-     * Derives a 16-byte IV from a {@link Date} by formatting it as a string and
-     * taking the first 16 UTF-8 bytes (zero-padded if shorter).
+     * Derives a 16-byte IV from a {@link Date}: formats the date, takes the first 16 UTF-8 bytes.
      *
      * @param date   source date
      * @param format {@link SimpleDateFormat} pattern
      * @return 16-byte IV array
      */
     private static byte[] ivFromDate(Date date, String format) {
-        String dateStr  = new SimpleDateFormat(format).format(date);
-        byte[] dateBytes = dateStr.getBytes(UTF_8);
+        byte[] dateBytes = new SimpleDateFormat(format).format(date).getBytes(UTF_8);
         byte[] iv = new byte[IV_LENGTH];
         System.arraycopy(dateBytes, 0, iv, 0, Math.min(dateBytes.length, IV_LENGTH));
         return iv;
     }
 
     /**
-     * Decodes a Base64 string, throwing {@link InvalidCiphertextException} for invalid input.
+     * Decodes a Base64 string, wrapping {@link IllegalArgumentException} as
+     * {@link InvalidCiphertextException}.
      *
-     * @param base64 the Base64 string to decode
+     * @param base64 input Base64 string
      * @return decoded bytes
      * @throws InvalidCiphertextException if the input is not valid Base64
      */
-    private static byte[] decodeBase64(String base64) throws InvalidCiphertextException {
+    private static byte[] decodeBase64Safe(String base64) throws InvalidCiphertextException {
         try {
             return Base64.getDecoder().decode(base64);
         } catch (IllegalArgumentException e) {

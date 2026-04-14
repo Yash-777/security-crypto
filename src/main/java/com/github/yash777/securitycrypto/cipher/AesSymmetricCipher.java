@@ -64,9 +64,9 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * @see <a href="https://docs.oracle.com/en/java/javase/17/docs/specs/security/standard-names.html#cipher-algorithm-names">
  *      Cipher Algorithm Standard Names</a>
  */
-public class AesCipher {
+public class AesSymmetricCipher {
 
-    private static final Logger log = LoggerFactory.getLogger(AesCipher.class);
+    private static final Logger log = LoggerFactory.getLogger(AesSymmetricCipher.class);
 
     /** GCM authentication tag length in bits (128 = maximum, recommended by NIST). */
     private static final int GCM_TAG_LENGTH_BITS = 128;

@@ -46,9 +46,9 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * @version 1.0.0
  * @see <a href="http://docs.oracle.com/javase/7/docs/api/javax/crypto/Cipher.html">javax.crypto.Cipher</a>
  */
-public class RsaCipher {
+public class RsaAsymmetricCipher {
 
-    private static final Logger log = LoggerFactory.getLogger(RsaCipher.class);
+    private static final Logger log = LoggerFactory.getLogger(RsaAsymmetricCipher.class);
 
     /**
      * RSA transformation with OAEP padding (SHA-256 hash, MGF1 mask generation function).

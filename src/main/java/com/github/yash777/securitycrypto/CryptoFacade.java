@@ -1,10 +1,10 @@
 package com.github.yash777.securitycrypto;
 
-import com.github.yash777.securitycrypto.cipher.AesCipher;
+import com.github.yash777.securitycrypto.cipher.AesSymmetricCipher;
 import com.github.yash777.securitycrypto.cipher.CipherMode;
 import com.github.yash777.securitycrypto.cipher.HybridCipher;
 import com.github.yash777.securitycrypto.cipher.HybridCipher.HybridPayload;
-import com.github.yash777.securitycrypto.cipher.RsaCipher;
+import com.github.yash777.securitycrypto.cipher.RsaAsymmetricCipher;
 import com.github.yash777.securitycrypto.exception.CryptoOperationException;
 import com.github.yash777.securitycrypto.exception.InvalidCiphertextException;
 import com.github.yash777.securitycrypto.key.KeyManager;
@@ -22,7 +22,7 @@ import java.security.PublicKey;
  * Facade providing the primary, opinionated API for the {@code security-crypto} library.
  *
  * <p>Most applications only need this class. It wires together
- * {@link AesCipher}, {@link RsaCipher}, {@link HybridCipher},
+ * {@link AesSymmetricCipher}, {@link RsaAsymmetricCipher}, {@link HybridCipher},
  * {@link KeyManager}, and {@link IvUtils} into simple, coherent methods.
  *
  * <h2>Quick-start examples</h2>
@@ -61,9 +61,9 @@ import java.security.PublicKey;
  */
 public class CryptoFacade {
 
-    private final AesCipher    aesCipher    = new AesCipher();
-    private final RsaCipher    rsaCipher    = new RsaCipher();
-    private final HybridCipher hybridCipher = new HybridCipher();
+    private final AesSymmetricCipher   aesSymmetricCipher  = new AesSymmetricCipher();
+    private final RsaAsymmetricCipher  rsaAsymmetricCipher = new RsaAsymmetricCipher();
+    private final HybridCipher         hybridCipher        = new HybridCipher();
 
     // -----------------------------------------------------------------------
     // Key management
@@ -115,7 +115,7 @@ public class CryptoFacade {
      * @throws CryptoOperationException if encryption fails
      */
     public String aesEncrypt(String plaintext, SecretKey key) {
-        return aesCipher.encrypt(plaintext, key, CipherMode.GCM);
+        return aesSymmetricCipher.encrypt(plaintext, key, CipherMode.GCM);
     }
 
     /**
@@ -128,7 +128,7 @@ public class CryptoFacade {
      */
     public String aesDecrypt(String ciphertext, SecretKey key)
             throws InvalidCiphertextException {
-        return aesCipher.decrypt(ciphertext, key, CipherMode.GCM);
+        return aesSymmetricCipher.decrypt(ciphertext, key, CipherMode.GCM);
     }
 
     // -----------------------------------------------------------------------
@@ -145,7 +145,7 @@ public class CryptoFacade {
      * @return Base64-encoded payload (IV prepended for CBC and GCM)
      */
     public String aesEncrypt(String plaintext, SecretKey key, CipherMode mode) {
-        return aesCipher.encrypt(plaintext, key, mode);
+        return aesSymmetricCipher.encrypt(plaintext, key, mode);
     }
 
     /**
@@ -159,7 +159,7 @@ public class CryptoFacade {
      * @return Base64-encoded payload
      */
     public String aesEncrypt(String plaintext, SecretKey key, CipherMode mode, IvParameterSpec ivSpec) {
-        return aesCipher.encrypt(plaintext, key, mode, ivSpec);
+        return aesSymmetricCipher.encrypt(plaintext, key, mode, ivSpec);
     }
 
     /**
@@ -173,7 +173,7 @@ public class CryptoFacade {
      */
     public String aesDecrypt(String ciphertext, SecretKey key, CipherMode mode)
             throws InvalidCiphertextException {
-        return aesCipher.decrypt(ciphertext, key, mode);
+        return aesSymmetricCipher.decrypt(ciphertext, key, mode);
     }
 
     // -----------------------------------------------------------------------
@@ -191,7 +191,7 @@ public class CryptoFacade {
      * @return Base64-encoded RSA ciphertext
      */
     public String rsaEncrypt(String plaintext, PublicKey publicKey) {
-        return rsaCipher.encrypt(plaintext, publicKey);
+        return rsaAsymmetricCipher.encrypt(plaintext, publicKey);
     }
 
     /**
@@ -204,7 +204,7 @@ public class CryptoFacade {
      */
     public String rsaDecrypt(String ciphertext, PrivateKey privateKey)
             throws InvalidCiphertextException {
-        return rsaCipher.decrypt(ciphertext, privateKey);
+        return rsaAsymmetricCipher.decrypt(ciphertext, privateKey);
     }
 
     // -----------------------------------------------------------------------
